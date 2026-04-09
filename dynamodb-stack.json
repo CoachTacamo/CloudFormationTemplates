@@ -1,0 +1,213 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "DynamoDB tables for RAG pipeline document tracking and chunk metadata",
+    "Parameters": {
+        "PrivateRouteTableId": {
+            "Type": "String",
+            "Description": "Route table ID for the private subnets (gateway endpoint attaches here)"
+        },
+        "ProjectPrefix": {
+            "Type": "String",
+            "MaxLength": 30,
+            "AllowedPattern": "^[a-z0-9][a-z0-9\\-]*[a-z0-9]$",
+            "Description": "Short prefix for resource names (e.g. rag-dev). Max 30 chars, lowercase alphanumeric and hyphens only."
+        },
+        "VpcId": {
+            "Type": "AWS::EC2::VPC::Id",
+            "Description": "VPC ID where the DynamoDB gateway endpoint will be created"
+        },
+        "EnvironmentTag": {
+            "Type": "String",
+            "Description": "Environment tag value for resources (e.g. Production, Staging, Development)"
+        }
+    },
+    "Resources": {
+        "ChunksTable": {
+            "Type": "AWS::DynamoDB::Table",
+            "DeletionPolicy": "RetainExceptOnCreate",
+            "UpdateReplacePolicy": "Retain",
+            "Properties": {
+                "TableName": {
+                    "Fn::Sub": "${ProjectPrefix}-chunks"
+                },
+                "BillingMode": "PAY_PER_REQUEST",
+                "AttributeDefinitions": [
+                    {
+                        "AttributeName": "documentId",
+                        "AttributeType": "S"
+                    },
+                    {
+                        "AttributeName": "chunkId",
+                        "AttributeType": "S"
+                    }
+                ],
+                "KeySchema": [
+                    {
+                        "AttributeName": "documentId",
+                        "KeyType": "HASH"
+                    },
+                    {
+                        "AttributeName": "chunkId",
+                        "KeyType": "RANGE"
+                    }
+                ],
+                "PointInTimeRecoverySpecification": {
+                    "PointInTimeRecoveryEnabled": true
+                },
+                "SSESpecification": {
+                    "SSEEnabled": true
+                },
+                "TimeToLiveSpecification": {
+                    "AttributeName": "ttl",
+                    "Enabled": true
+                },
+                "Tags": [
+                    {
+                        "Key": "Environment",
+                        "Value": { "Ref": "EnvironmentTag" }
+                    },
+                    {
+                        "Key": "Project",
+                        "Value": "RAGPipeline"
+                    }
+                ]
+            }
+        },
+        "DocumentsTable": {
+            "Type": "AWS::DynamoDB::Table",
+            "DeletionPolicy": "RetainExceptOnCreate",
+            "UpdateReplacePolicy": "Retain",
+            "Properties": {
+                "TableName": {
+                    "Fn::Sub": "${ProjectPrefix}-documents"
+                },
+                "BillingMode": "PAY_PER_REQUEST",
+                "AttributeDefinitions": [
+                    {
+                        "AttributeName": "documentId",
+                        "AttributeType": "S"
+                    }
+                ],
+                "KeySchema": [
+                    {
+                        "AttributeName": "documentId",
+                        "KeyType": "HASH"
+                    }
+                ],
+                "PointInTimeRecoverySpecification": {
+                    "PointInTimeRecoveryEnabled": true
+                },
+                "SSESpecification": {
+                    "SSEEnabled": true
+                },
+                "StreamSpecification": {
+                    "StreamViewType": "NEW_AND_OLD_IMAGES"
+                },
+                "Tags": [
+                    {
+                        "Key": "Environment",
+                        "Value": { "Ref": "EnvironmentTag" }
+                    },
+                    {
+                        "Key": "Project",
+                        "Value": "RAGPipeline"
+                    }
+                ]
+            }
+        },
+        "DynamoDBGatewayEndpoint": {
+            "Type": "AWS::EC2::VPCEndpoint",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VpcId"
+                },
+                "ServiceName": {
+                    "Fn::Sub": "com.amazonaws.${AWS::Region}.dynamodb"
+                },
+                "VpcEndpointType": "Gateway",
+                "RouteTableIds": [
+                    {
+                        "Ref": "PrivateRouteTableId"
+                    }
+                ]
+            }
+        }
+    },
+    "Outputs": {
+        "ChunksTableArn": {
+            "Description": "ARN of the Chunks table",
+            "Value": {
+                "Fn::GetAtt": [
+                    "ChunksTable",
+                    "Arn"
+                ]
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-ChunksTableArn"
+                }
+            }
+        },
+        "ChunksTableName": {
+            "Description": "Name of the Chunks table",
+            "Value": {
+                "Ref": "ChunksTable"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-ChunksTableName"
+                }
+            }
+        },
+        "DocumentsTableArn": {
+            "Description": "ARN of the Documents table",
+            "Value": {
+                "Fn::GetAtt": [
+                    "DocumentsTable",
+                    "Arn"
+                ]
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-DocumentsTableArn"
+                }
+            }
+        },
+        "DocumentsTableName": {
+            "Description": "Name of the Documents table",
+            "Value": {
+                "Ref": "DocumentsTable"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-DocumentsTableName"
+                }
+            }
+        },
+        "DocumentsTableStreamArn": {
+            "Description": "Stream ARN of the Documents table",
+            "Value": {
+                "Fn::GetAtt": [
+                    "DocumentsTable",
+                    "StreamArn"
+                ]
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-DocumentsTableStreamArn"
+                }
+            }
+        },
+        "DynamoDBVpcEndpointId": {
+            "Description": "DynamoDB gateway VPC endpoint ID",
+            "Value": {
+                "Ref": "DynamoDBGatewayEndpoint"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-DynamoDBVpcEndpointId"
+                }
+            }
+        }
+    }
+}

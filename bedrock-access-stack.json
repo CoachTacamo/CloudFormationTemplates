@@ -1,0 +1,270 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Manages Bedrock foundation model access via Custom Resource. Enables model agreements on create, removes on delete for clean teardown.",
+    "Parameters": {
+        "EmbeddingModelId": {
+            "Type": "String",
+            "Default": "amazon.titan-embed-text-v2:0",
+            "Description": "Bedrock embedding model ID"
+        },
+        "GenerationModelId": {
+            "Type": "String",
+            "Default": "amazon.nova-pro-v1:0",
+            "Description": "Bedrock generation model ID"
+        },
+        "ProjectPrefix": {
+            "Type": "String",
+            "MaxLength": 30,
+            "AllowedPattern": "^[a-z0-9][a-z0-9\\-]*[a-z0-9]$",
+            "Description": "Short prefix for resource names"
+        },
+        "EnvironmentTag": {
+            "Type": "String",
+            "Description": "Environment tag value for resources (e.g. Production, Staging, Development)"
+        }
+    },
+    "Resources": {
+        "BedrockAccessFunction": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "FunctionName": {
+                    "Fn::Sub": "${ProjectPrefix}-bedrock-access"
+                },
+                "Runtime": "python3.12",
+                "Handler": "index.handler",
+                "Role": {
+                    "Fn::GetAtt": [
+                        "BedrockAccessFunctionRole",
+                        "Arn"
+                    ]
+                },
+                "Timeout": 120,
+                "MemorySize": 256,
+                "Code": {
+                    "ZipFile": {
+                        "Fn::Join": [
+                            "\n",
+                            [
+                                "import json",
+                                "import boto3",
+                                "import urllib3",
+                                "",
+                                "bedrock = boto3.client('bedrock')",
+                                "http = urllib3.PoolManager()",
+                                "",
+                                "def send_response(event, context, status, reason='', data=None):",
+                                "    body = json.dumps({",
+                                "        'Status': status,",
+                                "        'Reason': reason or f'See CloudWatch Log Stream: {context.log_stream_name}',",
+                                "        'PhysicalResourceId': event.get('PhysicalResourceId', context.log_stream_name),",
+                                "        'StackId': event['StackId'],",
+                                "        'RequestId': event['RequestId'],",
+                                "        'LogicalResourceId': event['LogicalResourceId'],",
+                                "        'Data': data or {},",
+                                "    })",
+                                "    http.request('PUT', event['ResponseURL'], body=body.encode('utf-8'), headers={'Content-Type': ''})",
+                                "",
+                                "def get_model_ids(event):",
+                                "    return event.get('ResourceProperties', {}).get('ModelIds', [])",
+                                "",
+                                "def get_offer_token(model_id):",
+                                "    resp = bedrock.list_foundation_model_agreement_offers(modelId=model_id, offerType='ALL')",
+                                "    offers = resp.get('offers', [])",
+                                "    if not offers:",
+                                "        raise RuntimeError(f'No offers found for model {model_id}')",
+                                "    return offers[0]['offerToken']",
+                                "",
+                                "def create_agreements(model_ids):",
+                                "    results = {}",
+                                "    for model_id in model_ids:",
+                                "        try:",
+                                "            token = get_offer_token(model_id)",
+                                "            bedrock.create_foundation_model_agreement(modelId=model_id, offerToken=token)",
+                                "            availability = bedrock.get_foundation_model_availability(modelId=model_id)",
+                                "            status = availability.get('agreementAvailability', {}).get('status', 'UNKNOWN')",
+                                "            results[model_id] = status",
+                                "        except bedrock.exceptions.ValidationException as e:",
+                                "            results[model_id] = f'SKIPPED ({str(e)})'",
+                                "        except Exception as e:",
+                                "            raise RuntimeError(f'Failed to enable model {model_id}: {str(e)}')",
+                                "    return results",
+                                "",
+                                "def delete_agreements(model_ids):",
+                                "    results = {}",
+                                "    for model_id in model_ids:",
+                                "        try:",
+                                "            bedrock.delete_foundation_model_agreement(modelId=model_id)",
+                                "            results[model_id] = 'DELETED'",
+                                "        except Exception as e:",
+                                "            results[model_id] = f'DELETE_SKIPPED ({str(e)})'",
+                                "    return results",
+                                "",
+                                "def handler(event, context):",
+                                "    request_type = event['RequestType']",
+                                "    model_ids = get_model_ids(event)",
+                                "    try:",
+                                "        if request_type == 'Create':",
+                                "            results = create_agreements(model_ids)",
+                                "            send_response(event, context, 'SUCCESS', data={'Models': json.dumps(results)})",
+                                "        elif request_type == 'Update':",
+                                "            old_ids = set(event.get('OldResourceProperties', {}).get('ModelIds', []))",
+                                "            new_ids = set(model_ids)",
+                                "            to_add = new_ids - old_ids",
+                                "            to_remove = old_ids - new_ids",
+                                "            if to_remove:",
+                                "                delete_agreements(list(to_remove))",
+                                "            if to_add:",
+                                "                create_agreements(list(to_add))",
+                                "            results = {m: 'CURRENT' for m in new_ids & old_ids}",
+                                "            results.update({m: 'ADDED' for m in to_add})",
+                                "            results.update({m: 'REMOVED' for m in to_remove})",
+                                "            send_response(event, context, 'SUCCESS', data={'Models': json.dumps(results)})",
+                                "        elif request_type == 'Delete':",
+                                "            results = delete_agreements(model_ids)",
+                                "            send_response(event, context, 'SUCCESS', data={'Models': json.dumps(results)})",
+                                "        else:",
+                                "            send_response(event, context, 'FAILED', reason=f'Unknown RequestType: {request_type}')",
+                                "    except Exception as e:",
+                                "        send_response(event, context, 'FAILED', reason=str(e))"
+                            ]
+                        ]
+                    }
+                },
+                "Tags": [
+                    {
+                        "Key": "Project",
+                        "Value": {
+                            "Ref": "ProjectPrefix"
+                        }
+                    },
+                    {
+                        "Key": "Environment",
+                        "Value": { "Ref": "EnvironmentTag" }
+                    }
+                ]
+            }
+        },
+        "BedrockAccessFunctionRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "RoleName": {
+                    "Fn::Sub": "${ProjectPrefix}-bedrock-access-role"
+                },
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "lambda.amazonaws.com"
+                            },
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                },
+                "Policies": [
+                    {
+                        "PolicyName": "BedrockModelAccessManagement",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "bedrock:CreateFoundationModelAgreement",
+                                        "bedrock:DeleteFoundationModelAgreement",
+                                        "bedrock:GetFoundationModelAvailability",
+                                        "bedrock:ListFoundationModelAgreementOffers"
+                                    ],
+                                    "Resource": "*"
+                                },
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "aws-marketplace:Subscribe",
+                                        "aws-marketplace:Unsubscribe",
+                                        "aws-marketplace:ViewSubscriptions"
+                                    ],
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "PolicyName": "CloudWatchLogs",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "logs:CreateLogGroup",
+                                        "logs:CreateLogStream",
+                                        "logs:PutLogEvents"
+                                    ],
+                                    "Resource": {
+                                        "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectPrefix}-bedrock-access:*"
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Project",
+                        "Value": {
+                            "Ref": "ProjectPrefix"
+                        }
+                    },
+                    {
+                        "Key": "Environment",
+                        "Value": { "Ref": "EnvironmentTag" }
+                    }
+                ]
+            }
+        },
+        "BedrockModelAccess": {
+            "Type": "Custom::BedrockModelAccess",
+            "Properties": {
+                "ServiceToken": {
+                    "Fn::GetAtt": [
+                        "BedrockAccessFunction",
+                        "Arn"
+                    ]
+                },
+                "ModelIds": [
+                    {
+                        "Ref": "EmbeddingModelId"
+                    },
+                    {
+                        "Ref": "GenerationModelId"
+                    }
+                ]
+            }
+        }
+    },
+    "Outputs": {
+        "BedrockAccessFunctionArn": {
+            "Description": "ARN of the Bedrock access management Lambda",
+            "Value": {
+                "Fn::GetAtt": [
+                    "BedrockAccessFunction",
+                    "Arn"
+                ]
+            }
+        },
+        "EmbeddingModelId": {
+            "Description": "Bedrock embedding model ID with access enabled",
+            "Value": {
+                "Ref": "EmbeddingModelId"
+            }
+        },
+        "GenerationModelId": {
+            "Description": "Bedrock generation model ID with access enabled",
+            "Value": {
+                "Ref": "GenerationModelId"
+            }
+        }
+    }
+}

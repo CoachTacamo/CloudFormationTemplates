@@ -1,0 +1,362 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "S3 buckets with versioning and ABAC enabled",
+    "Parameters": {
+        "PrivateRouteTableId": {
+            "Type": "String",
+            "Description": "Route table ID for the private subnets (gateway endpoint attaches here)"
+        },
+        "ProjectPrefix": {
+            "Type": "String",
+            "MaxLength": 30,
+            "AllowedPattern": "^[a-z0-9][a-z0-9\\-]*[a-z0-9]$",
+            "Description": "Short prefix for S3 bucket names (e.g. rag-dev). Max 30 chars, lowercase alphanumeric and hyphens only."
+        },
+        "VpcId": {
+            "Type": "AWS::EC2::VPC::Id",
+            "Description": "VPC ID for the S3 gateway endpoint"
+        },
+        "EnvironmentTag": {
+            "Type": "String",
+            "Description": "Environment tag value for resources (e.g. Production, Staging, Development)"
+        }
+    },
+    "Resources": {
+        "EmbeddingsVectorsBucket": {
+            "Type": "AWS::S3::Bucket",
+            "DeletionPolicy": "RetainExceptOnCreate",
+            "UpdateReplacePolicy": "Retain",
+            "Properties": {
+                "BucketName": {
+                    "Fn::Sub": "${ProjectPrefix}-embeddings-vectors"
+                },
+                "AbacStatus": "Enabled",
+                "VersioningConfiguration": {
+                    "Status": "Enabled"
+                },
+                "PublicAccessBlockConfiguration": {
+                    "BlockPublicAcls": true,
+                    "BlockPublicPolicy": true,
+                    "IgnorePublicAcls": true,
+                    "RestrictPublicBuckets": true
+                },
+                "Tags": [
+                    {
+                        "Key": "Environment",
+                        "Value": { "Ref": "EnvironmentTag" }
+                    }
+                ]
+            }
+        },
+        "LogsAuditBucket": {
+            "Type": "AWS::S3::Bucket",
+            "DeletionPolicy": "RetainExceptOnCreate",
+            "UpdateReplacePolicy": "Retain",
+            "Properties": {
+                "BucketName": {
+                    "Fn::Sub": "${ProjectPrefix}-logs-audit"
+                },
+                "AbacStatus": "Enabled",
+                "VersioningConfiguration": {
+                    "Status": "Enabled"
+                },
+                "PublicAccessBlockConfiguration": {
+                    "BlockPublicAcls": true,
+                    "BlockPublicPolicy": true,
+                    "IgnorePublicAcls": true,
+                    "RestrictPublicBuckets": true
+                },
+                "Tags": [
+                    {
+                        "Key": "Environment",
+                        "Value": { "Ref": "EnvironmentTag" }
+                    }
+                ]
+            }
+        },
+        "MetadataIndexBucket": {
+            "Type": "AWS::S3::Bucket",
+            "DeletionPolicy": "RetainExceptOnCreate",
+            "UpdateReplacePolicy": "Retain",
+            "Properties": {
+                "BucketName": {
+                    "Fn::Sub": "${ProjectPrefix}-metadata-index"
+                },
+                "AbacStatus": "Enabled",
+                "VersioningConfiguration": {
+                    "Status": "Enabled"
+                },
+                "PublicAccessBlockConfiguration": {
+                    "BlockPublicAcls": true,
+                    "BlockPublicPolicy": true,
+                    "IgnorePublicAcls": true,
+                    "RestrictPublicBuckets": true
+                },
+                "Tags": [
+                    {
+                        "Key": "Environment",
+                        "Value": { "Ref": "EnvironmentTag" }
+                    }
+                ]
+            }
+        },
+        "PipelineArtifactsBucket": {
+            "Type": "AWS::S3::Bucket",
+            "DeletionPolicy": "RetainExceptOnCreate",
+            "UpdateReplacePolicy": "Delete",
+            "Properties": {
+                "BucketName": {
+                    "Fn::Sub": "${ProjectPrefix}-pipeline-artifacts"
+                },
+                "AbacStatus": "Enabled",
+                "VersioningConfiguration": {
+                    "Status": "Enabled"
+                },
+                "PublicAccessBlockConfiguration": {
+                    "BlockPublicAcls": true,
+                    "BlockPublicPolicy": true,
+                    "IgnorePublicAcls": true,
+                    "RestrictPublicBuckets": true
+                },
+                "Tags": [
+                    {
+                        "Key": "Environment",
+                        "Value": { "Ref": "EnvironmentTag" }
+                    }
+                ]
+            }
+        },
+        "ProcessedDocumentsBucket": {
+            "Type": "AWS::S3::Bucket",
+            "DeletionPolicy": "RetainExceptOnCreate",
+            "UpdateReplacePolicy": "Retain",
+            "Properties": {
+                "BucketName": {
+                    "Fn::Sub": "${ProjectPrefix}-processed-documents"
+                },
+                "AbacStatus": "Enabled",
+                "VersioningConfiguration": {
+                    "Status": "Enabled"
+                },
+                "PublicAccessBlockConfiguration": {
+                    "BlockPublicAcls": true,
+                    "BlockPublicPolicy": true,
+                    "IgnorePublicAcls": true,
+                    "RestrictPublicBuckets": true
+                },
+                "Tags": [
+                    {
+                        "Key": "Environment",
+                        "Value": { "Ref": "EnvironmentTag" }
+                    }
+                ]
+            }
+        },
+        "RawDocumentsBucket": {
+            "Type": "AWS::S3::Bucket",
+            "DeletionPolicy": "RetainExceptOnCreate",
+            "UpdateReplacePolicy": "Retain",
+            "Properties": {
+                "BucketName": {
+                    "Fn::Sub": "${ProjectPrefix}-raw-documents"
+                },
+                "AbacStatus": "Enabled",
+                "VersioningConfiguration": {
+                    "Status": "Enabled"
+                },
+                "PublicAccessBlockConfiguration": {
+                    "BlockPublicAcls": true,
+                    "BlockPublicPolicy": true,
+                    "IgnorePublicAcls": true,
+                    "RestrictPublicBuckets": true
+                },
+                "Tags": [
+                    {
+                        "Key": "Environment",
+                        "Value": { "Ref": "EnvironmentTag" }
+                    }
+                ]
+            }
+        },
+        "S3GatewayEndpoint": {
+            "Type": "AWS::EC2::VPCEndpoint",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VpcId"
+                },
+                "ServiceName": {
+                    "Fn::Sub": "com.amazonaws.${AWS::Region}.s3"
+                },
+                "VpcEndpointType": "Gateway",
+                "RouteTableIds": [
+                    {
+                        "Ref": "PrivateRouteTableId"
+                    }
+                ]
+            }
+        }
+    },
+    "Outputs": {
+        "EmbeddingsVectorsBucketArn": {
+            "Description": "ARN of the embeddings vectors bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "EmbeddingsVectorsBucket",
+                    "Arn"
+                ]
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-EmbeddingsVectorsBucketArn"
+                }
+            }
+        },
+        "EmbeddingsVectorsBucketName": {
+            "Description": "Name of the embeddings vectors bucket",
+            "Value": {
+                "Ref": "EmbeddingsVectorsBucket"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-EmbeddingsVectorsBucketName"
+                }
+            }
+        },
+        "LogsAuditBucketArn": {
+            "Description": "ARN of the logs audit bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "LogsAuditBucket",
+                    "Arn"
+                ]
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-LogsAuditBucketArn"
+                }
+            }
+        },
+        "LogsAuditBucketName": {
+            "Description": "Name of the logs audit bucket",
+            "Value": {
+                "Ref": "LogsAuditBucket"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-LogsAuditBucketName"
+                }
+            }
+        },
+        "MetadataIndexBucketArn": {
+            "Description": "ARN of the metadata index bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "MetadataIndexBucket",
+                    "Arn"
+                ]
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-MetadataIndexBucketArn"
+                }
+            }
+        },
+        "MetadataIndexBucketName": {
+            "Description": "Name of the metadata index bucket",
+            "Value": {
+                "Ref": "MetadataIndexBucket"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-MetadataIndexBucketName"
+                }
+            }
+        },
+        "PipelineArtifactsBucketArn": {
+            "Description": "ARN of the pipeline artifacts bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "PipelineArtifactsBucket",
+                    "Arn"
+                ]
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-PipelineArtifactsBucketArn"
+                }
+            }
+        },
+        "PipelineArtifactsBucketName": {
+            "Description": "Name of the pipeline artifacts bucket",
+            "Value": {
+                "Ref": "PipelineArtifactsBucket"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-PipelineArtifactsBucketName"
+                }
+            }
+        },
+        "ProcessedDocumentsBucketArn": {
+            "Description": "ARN of the processed documents bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "ProcessedDocumentsBucket",
+                    "Arn"
+                ]
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-ProcessedDocumentsBucketArn"
+                }
+            }
+        },
+        "ProcessedDocumentsBucketName": {
+            "Description": "Name of the processed documents bucket",
+            "Value": {
+                "Ref": "ProcessedDocumentsBucket"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-ProcessedDocumentsBucketName"
+                }
+            }
+        },
+        "RawDocumentsBucketArn": {
+            "Description": "ARN of the raw documents bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "RawDocumentsBucket",
+                    "Arn"
+                ]
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-RawDocumentsBucketArn"
+                }
+            }
+        },
+        "RawDocumentsBucketName": {
+            "Description": "Name of the raw documents bucket",
+            "Value": {
+                "Ref": "RawDocumentsBucket"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-RawDocumentsBucketName"
+                }
+            }
+        },
+        "S3VpcEndpointId": {
+            "Description": "S3 gateway VPC endpoint ID",
+            "Value": {
+                "Ref": "S3GatewayEndpoint"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-S3VpcEndpointId"
+                }
+            }
+        }
+    }
+}

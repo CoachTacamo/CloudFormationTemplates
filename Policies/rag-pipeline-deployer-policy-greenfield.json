@@ -1,0 +1,176 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CloudFormationUnscopedReads",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:GetTemplateSummary",
+        "cloudformation:ValidateTemplate"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CloudFormationStackManagement",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:CreateChangeSet",
+        "cloudformation:CreateStack",
+        "cloudformation:DeleteChangeSet",
+        "cloudformation:DeleteStack",
+        "cloudformation:DescribeChangeSet",
+        "cloudformation:DescribeStackEvents",
+        "cloudformation:DescribeStackResources",
+        "cloudformation:DescribeStacks",
+        "cloudformation:ExecuteChangeSet",
+        "cloudformation:GetTemplate",
+        "cloudformation:GetTemplateSummary",
+        "cloudformation:ListChangeSets",
+        "cloudformation:ListStackResources",
+        "cloudformation:TagResource",
+        "cloudformation:UntagResource",
+        "cloudformation:UpdateStack"
+      ],
+      "Resource": "arn:aws:cloudformation:*:*:stack/rag-*"
+    },
+    {
+      "Sid": "NestedStackTemplateAccess",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": "arn:aws:s3:::cf-templates-*/*",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": ["*opensearch-stack*", "*dynamodb-stack*", "*storage-stack*", "*rag-pipeline*"]
+        }
+      }
+    },
+
+    {
+      "Sid": "S3BucketManagement",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:DeleteBucketPolicy",
+        "s3:GetAbortMultipartUpload",
+        "s3:GetBucketAcl",
+        "s3:GetBucketLocation",
+        "s3:GetBucketPolicy",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetBucketTagging",
+        "s3:GetBucketVersioning",
+        "s3:GetEncryptionConfiguration",
+        "s3:GetLifecycleConfiguration",
+        "s3:ListBucket",
+        "s3:PutBucketPolicy",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:PutBucketTagging",
+        "s3:PutBucketVersioning",
+        "s3:PutEncryptionConfiguration",
+        "s3:PutLifecycleConfiguration"
+      ],
+      "Resource": [
+        "arn:aws:s3:::*-embeddings-vectors",
+        "arn:aws:s3:::*-logs-audit",
+        "arn:aws:s3:::*-metadata-index",
+        "arn:aws:s3:::*-pipeline-artifacts",
+        "arn:aws:s3:::*-processed-documents",
+        "arn:aws:s3:::*-raw-documents"
+      ]
+    },
+
+    {
+      "Sid": "DynamoDBTableManagement",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:DescribeContinuousBackups",
+        "dynamodb:DescribeTable",
+        "dynamodb:DescribeTimeToLive",
+        "dynamodb:ListTagsOfResource",
+        "dynamodb:TagResource",
+        "dynamodb:UntagResource",
+        "dynamodb:UpdateContinuousBackups",
+        "dynamodb:UpdateTable",
+        "dynamodb:UpdateTimeToLive",
+        "dynamodb:DescribeKinesisStreamingDestination"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:*:*:table/*-documents",
+        "arn:aws:dynamodb:*:*:table/*-chunks"
+      ]
+    },
+
+    {
+      "Sid": "OpenSearchServerlessManagement",
+      "Effect": "Allow",
+      "Action": [
+        "aoss:BatchGetCollection",
+        "aoss:BatchGetVpcEndpoint",
+        "aoss:CreateAccessPolicy",
+        "aoss:CreateCollection",
+        "aoss:CreateSecurityPolicy",
+        "aoss:CreateVpcEndpoint",
+        "aoss:DeleteAccessPolicy",
+        "aoss:DeleteCollection",
+        "aoss:DeleteSecurityPolicy",
+        "aoss:DeleteVpcEndpoint",
+        "aoss:GetAccessPolicy",
+        "aoss:GetSecurityPolicy",
+        "aoss:ListAccessPolicies",
+        "aoss:ListCollections",
+        "aoss:ListSecurityPolicies",
+        "aoss:ListTagsForResource",
+        "aoss:ListVpcEndpoints",
+        "aoss:TagResource",
+        "aoss:UntagResource",
+        "aoss:UpdateAccessPolicy",
+        "aoss:UpdateCollection",
+        "aoss:UpdateSecurityPolicy",
+        "aoss:UpdateVpcEndpoint"
+      ],
+      "Resource": "*"
+    },
+
+    {
+      "Sid": "EC2VpcEndpointManagement",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateVpcEndpoint",
+        "ec2:DeleteVpcEndpoints",
+        "ec2:DescribeVpcEndpoints",
+        "ec2:ModifyVpcEndpoint"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EC2DescribeActions",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeAvailabilityZones",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DescribeRouteTables",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeVpcAttribute",
+        "ec2:DescribeVpcs"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EC2TaggingForStackResources",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateTags",
+        "ec2:DeleteTags"
+      ],
+      "Resource": [
+        "arn:aws:ec2:*:*:vpc-endpoint/*",
+        "arn:aws:ec2:*:*:security-group/*"
+      ]
+    }
+  ]
+}

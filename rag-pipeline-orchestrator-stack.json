@@ -1,0 +1,550 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Parent orchestrator stack for the RAG pipeline",
+    "Parameters": {
+        "DeploymentDate": {
+            "Type": "String",
+            "AllowedPattern": "^\\d{2}-\\d{2}-\\d{4}$",
+            "Description": "Deployment date in MM-DD-YYYY format (e.g. 07-15-2026). Used in the RDS instance identifier."
+        },
+        "InternalSGId": {
+            "Type": "AWS::EC2::SecurityGroup::Id",
+            "Description": "Internal Security Group ID for pipeline resources"
+        },
+        "PrivateRouteTableId": {
+            "Type": "String",
+            "Description": "Route table ID for the private subnets, passed to nested stacks for gateway endpoints"
+        },
+        "PrivateSubnetAId": {
+            "Type": "AWS::EC2::Subnet::Id",
+            "Description": "Private Subnet A ID for pipeline resources"
+        },
+        "PrivateSubnetBId": {
+            "Type": "AWS::EC2::Subnet::Id",
+            "Description": "Private Subnet B ID for pipeline resources"
+        },
+        "ProjectPrefix": {
+            "Type": "String",
+            "MaxLength": 30,
+            "AllowedPattern": "^[a-z0-9][a-z0-9\\-]*[a-z0-9]$",
+            "Description": "Short prefix for resource names (e.g. rag-dev). Max 30 chars, lowercase alphanumeric and hyphens only."
+        },
+        "RdsDeletionProtection": {
+            "Type": "String",
+            "Default": "false",
+            "AllowedValues": [
+                "true",
+                "false"
+            ],
+            "Description": "Enable RDS deletion protection. Set to true for production."
+        },
+        "RdsKmsKeyArn": {
+            "Type": "String",
+            "Default": "",
+            "Description": "Optional KMS key ARN for RDS storage and Secrets Manager encryption. Leave empty for AWS-managed key."
+        },
+        "RdsMasterUsername": {
+            "Type": "String",
+            "Default": "pgadmin",
+            "Description": "Master username for the RDS PostgreSQL instance",
+            "NoEcho": true
+        },
+        "RdsMultiAZ": {
+            "Type": "String",
+            "Default": "false",
+            "AllowedValues": [
+                "true",
+                "false"
+            ],
+            "Description": "Enable Multi-AZ for RDS. Set to true for production workloads requiring automatic failover."
+        },
+        "StandbyReplicas": {
+            "Type": "String",
+            "Default": "DISABLED",
+            "AllowedValues": [
+                "ENABLED",
+                "DISABLED"
+            ],
+            "Description": "OpenSearch standby replicas (DISABLED cuts cost in half for dev/test)"
+        },
+        "VpcId": {
+            "Type": "AWS::EC2::VPC::Id",
+            "Description": "VPC ID where pipeline resources will be deployed"
+        },
+        "EnvironmentTag": {
+            "Type": "String",
+            "Description": "Environment tag value for resources (e.g. Production, Staging, Development)"
+        }
+    },
+    "Resources": {
+        "BedrockAccessStack": {
+            "Type": "AWS::CloudFormation::Stack",
+            "Properties": {
+                "TemplateURL": "bedrock-access-stack.json",
+                "Parameters": {
+                    "ProjectPrefix": {
+                        "Ref": "ProjectPrefix"
+                    },
+                    "EnvironmentTag": {
+                        "Ref": "EnvironmentTag"
+                    }
+                }
+            }
+        },
+        "DynamoDBStack": {
+            "Type": "AWS::CloudFormation::Stack",
+            "Properties": {
+                "TemplateURL": "dynamodb-stack.json",
+                "Parameters": {
+                    "ProjectPrefix": {
+                        "Ref": "ProjectPrefix"
+                    },
+                    "VpcId": {
+                        "Ref": "VpcId"
+                    },
+                    "PrivateRouteTableId": {
+                        "Ref": "PrivateRouteTableId"
+                    },
+                    "EnvironmentTag": {
+                        "Ref": "EnvironmentTag"
+                    }
+                }
+            }
+        },
+        "OpenSearchStack": {
+            "Type": "AWS::CloudFormation::Stack",
+            "Properties": {
+                "TemplateURL": "opensearch-stack.json",
+                "Parameters": {
+                    "ProjectPrefix": {
+                        "Ref": "ProjectPrefix"
+                    },
+                    "StandbyReplicas": {
+                        "Ref": "StandbyReplicas"
+                    },
+                    "VpcId": {
+                        "Ref": "VpcId"
+                    },
+                    "PrivateSubnetAId": {
+                        "Ref": "PrivateSubnetAId"
+                    },
+                    "PrivateSubnetBId": {
+                        "Ref": "PrivateSubnetBId"
+                    },
+                    "InternalSecurityGroupId": {
+                        "Ref": "InternalSGId"
+                    },
+                    "EnvironmentTag": {
+                        "Ref": "EnvironmentTag"
+                    }
+                }
+            }
+        },
+        "RDSStack": {
+            "Type": "AWS::CloudFormation::Stack",
+            "Properties": {
+                "TemplateURL": "rds-stack.json",
+                "Parameters": {
+                    "ProjectPrefix": {
+                        "Ref": "ProjectPrefix"
+                    },
+                    "DeploymentDate": {
+                        "Ref": "DeploymentDate"
+                    },
+                    "VpcId": {
+                        "Ref": "VpcId"
+                    },
+                    "PrivateSubnetIds": {
+                        "Fn::Join": [
+                            ",",
+                            [
+                                {
+                                    "Ref": "PrivateSubnetAId"
+                                },
+                                {
+                                    "Ref": "PrivateSubnetBId"
+                                }
+                            ]
+                        ]
+                    },
+                    "InternalSecurityGroupId": {
+                        "Ref": "InternalSGId"
+                    },
+                    "MultiAZ": {
+                        "Ref": "RdsMultiAZ"
+                    },
+                    "DeletionProtection": {
+                        "Ref": "RdsDeletionProtection"
+                    },
+                    "MasterUsername": {
+                        "Ref": "RdsMasterUsername"
+                    },
+                    "KmsKeyArn": {
+                        "Ref": "RdsKmsKeyArn"
+                    },
+                    "EnvironmentTag": {
+                        "Ref": "EnvironmentTag"
+                    }
+                }
+            }
+        },
+        "StorageStack": {
+            "Type": "AWS::CloudFormation::Stack",
+            "Properties": {
+                "TemplateURL": "storage-stack.json",
+                "Parameters": {
+                    "ProjectPrefix": {
+                        "Ref": "ProjectPrefix"
+                    },
+                    "VpcId": {
+                        "Ref": "VpcId"
+                    },
+                    "PrivateRouteTableId": {
+                        "Ref": "PrivateRouteTableId"
+                    },
+                    "EnvironmentTag": {
+                        "Ref": "EnvironmentTag"
+                    }
+                }
+            }
+        }
+    },
+    "Outputs": {
+        "BedrockEmbeddingModelId": {
+            "Description": "Bedrock embedding model ID with access enabled",
+            "Value": {
+                "Fn::GetAtt": [
+                    "BedrockAccessStack",
+                    "Outputs.EmbeddingModelId"
+                ]
+            }
+        },
+        "BedrockGenerationModelId": {
+            "Description": "Bedrock generation model ID with access enabled",
+            "Value": {
+                "Fn::GetAtt": [
+                    "BedrockAccessStack",
+                    "Outputs.GenerationModelId"
+                ]
+            }
+        },
+        "ChunksTableArn": {
+            "Description": "ARN of the Chunks DynamoDB table",
+            "Value": {
+                "Fn::GetAtt": [
+                    "DynamoDBStack",
+                    "Outputs.ChunksTableArn"
+                ]
+            }
+        },
+        "ChunksTableName": {
+            "Description": "Name of the Chunks DynamoDB table",
+            "Value": {
+                "Fn::GetAtt": [
+                    "DynamoDBStack",
+                    "Outputs.ChunksTableName"
+                ]
+            }
+        },
+        "CollectionArn": {
+            "Description": "OpenSearch Serverless collection ARN",
+            "Value": {
+                "Fn::GetAtt": [
+                    "OpenSearchStack",
+                    "Outputs.CollectionArn"
+                ]
+            }
+        },
+        "CollectionEndpoint": {
+            "Description": "OpenSearch Serverless collection endpoint",
+            "Value": {
+                "Fn::GetAtt": [
+                    "OpenSearchStack",
+                    "Outputs.CollectionEndpoint"
+                ]
+            }
+        },
+        "CollectionId": {
+            "Description": "OpenSearch Serverless collection ID",
+            "Value": {
+                "Fn::GetAtt": [
+                    "OpenSearchStack",
+                    "Outputs.CollectionId"
+                ]
+            }
+        },
+        "DashboardEndpoint": {
+            "Description": "OpenSearch Dashboards endpoint",
+            "Value": {
+                "Fn::GetAtt": [
+                    "OpenSearchStack",
+                    "Outputs.DashboardEndpoint"
+                ]
+            }
+        },
+        "DocumentsTableArn": {
+            "Description": "ARN of the Documents DynamoDB table",
+            "Value": {
+                "Fn::GetAtt": [
+                    "DynamoDBStack",
+                    "Outputs.DocumentsTableArn"
+                ]
+            }
+        },
+        "DocumentsTableName": {
+            "Description": "Name of the Documents DynamoDB table",
+            "Value": {
+                "Fn::GetAtt": [
+                    "DynamoDBStack",
+                    "Outputs.DocumentsTableName"
+                ]
+            }
+        },
+        "DocumentsTableStreamArn": {
+            "Description": "Stream ARN of the Documents DynamoDB table",
+            "Value": {
+                "Fn::GetAtt": [
+                    "DynamoDBStack",
+                    "Outputs.DocumentsTableStreamArn"
+                ]
+            }
+        },
+        "DynamoDBStackId": {
+            "Description": "Stack ID of the DynamoDB nested stack",
+            "Value": {
+                "Ref": "DynamoDBStack"
+            }
+        },
+        "DynamoDBVpcEndpointId": {
+            "Description": "DynamoDB gateway VPC endpoint ID",
+            "Value": {
+                "Fn::GetAtt": [
+                    "DynamoDBStack",
+                    "Outputs.DynamoDBVpcEndpointId"
+                ]
+            }
+        },
+        "EmbeddingsVectorsBucketArn": {
+            "Description": "ARN of the embeddings vectors bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "StorageStack",
+                    "Outputs.EmbeddingsVectorsBucketArn"
+                ]
+            }
+        },
+        "EmbeddingsVectorsBucketName": {
+            "Description": "Name of the embeddings vectors bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "StorageStack",
+                    "Outputs.EmbeddingsVectorsBucketName"
+                ]
+            }
+        },
+        "InternalSGId": {
+            "Description": "Internal Security Group ID used by the pipeline",
+            "Value": {
+                "Ref": "InternalSGId"
+            }
+        },
+        "LogsAuditBucketArn": {
+            "Description": "ARN of the logs audit bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "StorageStack",
+                    "Outputs.LogsAuditBucketArn"
+                ]
+            }
+        },
+        "LogsAuditBucketName": {
+            "Description": "Name of the logs audit bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "StorageStack",
+                    "Outputs.LogsAuditBucketName"
+                ]
+            }
+        },
+        "MetadataIndexBucketArn": {
+            "Description": "ARN of the metadata index bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "StorageStack",
+                    "Outputs.MetadataIndexBucketArn"
+                ]
+            }
+        },
+        "MetadataIndexBucketName": {
+            "Description": "Name of the metadata index bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "StorageStack",
+                    "Outputs.MetadataIndexBucketName"
+                ]
+            }
+        },
+        "OpenSearchStackId": {
+            "Description": "Stack ID of the OpenSearch nested stack",
+            "Value": {
+                "Ref": "OpenSearchStack"
+            }
+        },
+        "OpenSearchVpcEndpointId": {
+            "Description": "OpenSearch Serverless VPC endpoint ID",
+            "Value": {
+                "Fn::GetAtt": [
+                    "OpenSearchStack",
+                    "Outputs.VpcEndpointId"
+                ]
+            }
+        },
+        "PipelineArtifactsBucketArn": {
+            "Description": "ARN of the pipeline artifacts bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "StorageStack",
+                    "Outputs.PipelineArtifactsBucketArn"
+                ]
+            }
+        },
+        "PipelineArtifactsBucketName": {
+            "Description": "Name of the pipeline artifacts bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "StorageStack",
+                    "Outputs.PipelineArtifactsBucketName"
+                ]
+            }
+        },
+        "PrivateSubnetAId": {
+            "Description": "Private Subnet A ID used by the pipeline",
+            "Value": {
+                "Ref": "PrivateSubnetAId"
+            }
+        },
+        "PrivateSubnetBId": {
+            "Description": "Private Subnet B ID used by the pipeline",
+            "Value": {
+                "Ref": "PrivateSubnetBId"
+            }
+        },
+        "ProcessedDocumentsBucketArn": {
+            "Description": "ARN of the processed documents bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "StorageStack",
+                    "Outputs.ProcessedDocumentsBucketArn"
+                ]
+            }
+        },
+        "ProcessedDocumentsBucketName": {
+            "Description": "Name of the processed documents bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "StorageStack",
+                    "Outputs.ProcessedDocumentsBucketName"
+                ]
+            }
+        },
+        "RDSDBName": {
+            "Description": "Name of the initial PostgreSQL database",
+            "Value": {
+                "Fn::GetAtt": [
+                    "RDSStack",
+                    "Outputs.DBName"
+                ]
+            }
+        },
+        "RDSInstanceArn": {
+            "Description": "ARN of the RDS instance",
+            "Value": {
+                "Fn::GetAtt": [
+                    "RDSStack",
+                    "Outputs.DBInstanceArn"
+                ]
+            }
+        },
+        "RDSInstanceEndpoint": {
+            "Description": "RDS PostgreSQL instance endpoint address",
+            "Value": {
+                "Fn::GetAtt": [
+                    "RDSStack",
+                    "Outputs.DBInstanceEndpoint"
+                ]
+            }
+        },
+        "RDSInstancePort": {
+            "Description": "RDS PostgreSQL instance port",
+            "Value": {
+                "Fn::GetAtt": [
+                    "RDSStack",
+                    "Outputs.DBInstancePort"
+                ]
+            }
+        },
+        "RDSMasterUserSecretArn": {
+            "Description": "Secrets Manager ARN for RDS master credentials",
+            "Value": {
+                "Fn::GetAtt": [
+                    "RDSStack",
+                    "Outputs.MasterUserSecretArn"
+                ]
+            }
+        },
+        "RDSSecurityGroupId": {
+            "Description": "Security group ID for the RDS instance",
+            "Value": {
+                "Fn::GetAtt": [
+                    "RDSStack",
+                    "Outputs.RDSSecurityGroupId"
+                ]
+            }
+        },
+        "RDSStackId": {
+            "Description": "Stack ID of the RDS nested stack",
+            "Value": {
+                "Ref": "RDSStack"
+            }
+        },
+        "RawDocumentsBucketArn": {
+            "Description": "ARN of the raw documents bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "StorageStack",
+                    "Outputs.RawDocumentsBucketArn"
+                ]
+            }
+        },
+        "RawDocumentsBucketName": {
+            "Description": "Name of the raw documents bucket",
+            "Value": {
+                "Fn::GetAtt": [
+                    "StorageStack",
+                    "Outputs.RawDocumentsBucketName"
+                ]
+            }
+        },
+        "S3VpcEndpointId": {
+            "Description": "S3 gateway VPC endpoint ID",
+            "Value": {
+                "Fn::GetAtt": [
+                    "StorageStack",
+                    "Outputs.S3VpcEndpointId"
+                ]
+            }
+        },
+        "StorageStackId": {
+            "Description": "Stack ID of the storage nested stack",
+            "Value": {
+                "Ref": "StorageStack"
+            }
+        },
+        "VpcId": {
+            "Description": "VPC ID used by the pipeline",
+            "Value": {
+                "Ref": "VpcId"
+            }
+        }
+    }
+}

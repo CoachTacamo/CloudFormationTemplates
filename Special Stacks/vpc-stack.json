@@ -1,0 +1,234 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Private VPC with two isolated subnets for RAG pipeline development. No public access.",
+
+  "Parameters": {
+    "EnvironmentName": {
+      "Type": "String",
+      "Default": "prototype-rag-vpc-stack",
+      "Description": "Prefix for resource names"
+    },
+    "SubnetACidr": {
+      "Type": "String",
+      "Default": "10.0.1.0/24",
+      "Description": "CIDR block for private subnet A"
+    },
+    "SubnetBCidr": {
+      "Type": "String",
+      "Default": "10.0.2.0/24",
+      "Description": "CIDR block for private subnet B"
+    },
+    "VpcCidr": {
+      "Type": "String",
+      "Default": "10.0.0.0/16",
+      "Description": "CIDR block for the VPC"
+    }
+  },
+
+  "Resources": {
+    "InternalSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Allow TCP, UDP, and ICMP traffic only within the VPC CIDR. No external access.",
+        "VpcId": { "Ref": "VPC" },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 0,
+            "ToPort": 65535,
+            "CidrIp": { "Ref": "VpcCidr" },
+            "Description": "Allow all TCP from within VPC"
+          },
+          {
+            "IpProtocol": "udp",
+            "FromPort": 0,
+            "ToPort": 65535,
+            "CidrIp": { "Ref": "VpcCidr" },
+            "Description": "Allow all UDP from within VPC"
+          },
+          {
+            "IpProtocol": "icmp",
+            "FromPort": -1,
+            "ToPort": -1,
+            "CidrIp": { "Ref": "VpcCidr" },
+            "Description": "Allow ICMP from within VPC"
+          }
+        ],
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 0,
+            "ToPort": 65535,
+            "CidrIp": { "Ref": "VpcCidr" },
+            "Description": "Allow all TCP to within VPC"
+          },
+          {
+            "IpProtocol": "udp",
+            "FromPort": 0,
+            "ToPort": 65535,
+            "CidrIp": { "Ref": "VpcCidr" },
+            "Description": "Allow all UDP to within VPC"
+          },
+          {
+            "IpProtocol": "icmp",
+            "FromPort": -1,
+            "ToPort": -1,
+            "CidrIp": { "Ref": "VpcCidr" },
+            "Description": "Allow ICMP to within VPC"
+          }
+        ],
+
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": { "Fn::Sub": "${EnvironmentName}-internal-sg" }
+          },
+          {
+            "Key": "Environment",
+            "Value": { "Ref": "EnvironmentName" }
+          },
+          {
+            "Key": "Project",
+            "Value": "rag-pipeline"
+          }
+        ]
+      }
+    },
+
+    "PrivateRouteTable": {
+      "Type": "AWS::EC2::RouteTable",
+      "Properties": {
+        "VpcId": { "Ref": "VPC" },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": { "Fn::Sub": "${EnvironmentName}-private-rt" }
+          },
+          {
+            "Key": "Environment",
+            "Value": { "Ref": "EnvironmentName" }
+          },
+          {
+            "Key": "Project",
+            "Value": "rag-pipeline"
+          }
+        ]
+      }
+    },
+
+    "PrivateSubnetA": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": { "Ref": "VPC" },
+        "CidrBlock": { "Ref": "SubnetACidr" },
+        "AvailabilityZone": { "Fn::Select": [ "0", { "Fn::GetAZs": "" } ] },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": { "Fn::Sub": "${EnvironmentName}-private-a" }
+          },
+          {
+            "Key": "Environment",
+            "Value": { "Ref": "EnvironmentName" }
+          },
+          {
+            "Key": "Project",
+            "Value": "rag-pipeline"
+          }
+        ]
+      }
+    },
+
+    "PrivateSubnetB": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": { "Ref": "VPC" },
+        "CidrBlock": { "Ref": "SubnetBCidr" },
+        "AvailabilityZone": { "Fn::Select": [ "1", { "Fn::GetAZs": "" } ] },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": { "Fn::Sub": "${EnvironmentName}-private-b" }
+          },
+          {
+            "Key": "Environment",
+            "Value": { "Ref": "EnvironmentName" }
+          },
+          {
+            "Key": "Project",
+            "Value": "rag-pipeline"
+          }
+        ]
+      }
+    },
+
+    "SubnetARouteTableAssociation": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": { "Ref": "PrivateSubnetA" },
+        "RouteTableId": { "Ref": "PrivateRouteTable" }
+      }
+    },
+
+    "SubnetBRouteTableAssociation": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": { "Ref": "PrivateSubnetB" },
+        "RouteTableId": { "Ref": "PrivateRouteTable" }
+      }
+    },
+
+    "VPC": {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+        "CidrBlock": { "Ref": "VpcCidr" },
+        "EnableDnsSupport": true,
+        "EnableDnsHostnames": true,
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": { "Fn::Sub": "${EnvironmentName}-vpc" }
+          },
+          {
+            "Key": "Environment",
+            "Value": { "Ref": "EnvironmentName" }
+          },
+          {
+            "Key": "Project",
+            "Value": "rag-pipeline"
+          }
+        ]
+      }
+    }
+  },
+
+  "Outputs": {
+    "InternalSecurityGroupId": {
+      "Description": "Security group for internal VPC traffic",
+      "Value": { "Ref": "InternalSecurityGroup" },
+      "Export": { "Name": { "Fn::Sub": "${EnvironmentName}-InternalSGId" } }
+    },
+    "PrivateSubnetAId": {
+      "Description": "Private Subnet A ID",
+      "Value": { "Ref": "PrivateSubnetA" },
+      "Export": { "Name": { "Fn::Sub": "${EnvironmentName}-PrivateSubnetAId" } }
+    },
+    "PrivateSubnetBId": {
+      "Description": "Private Subnet B ID",
+      "Value": { "Ref": "PrivateSubnetB" },
+      "Export": { "Name": { "Fn::Sub": "${EnvironmentName}-PrivateSubnetBId" } }
+    },
+    "PrivateRouteTableId": {
+      "Description": "Private Route Table ID",
+      "Value": { "Ref": "PrivateRouteTable" },
+      "Export": { "Name": { "Fn::Sub": "${EnvironmentName}-PrivateRouteTableId" } }
+    },
+    "VpcId": {
+      "Description": "VPC ID",
+      "Value": { "Ref": "VPC" },
+      "Export": { "Name": { "Fn::Sub": "${EnvironmentName}-VpcId" } }
+    }
+  }
+}
