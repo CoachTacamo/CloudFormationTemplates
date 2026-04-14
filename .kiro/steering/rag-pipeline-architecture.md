@@ -5,6 +5,11 @@ description: Defines the AWS services, integration patterns, and design decision
 
 # Serverless RAG Pipeline — Architecture & Service Guidelines
 
+## Local Development Environment
+
+- This machine uses `python3`, not `python`. Always use `python3` and `python3 -m pip` in shell commands.
+- Test runner: `python3 -m pytest`
+
 This document defines the AWS services, their roles, and integration patterns for the serverless RAG pipeline. Use it as the reference when building or modifying any part of the pipeline.
 
 ## Architecture Overview
