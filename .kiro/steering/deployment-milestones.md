@@ -53,6 +53,18 @@ Each layer must be fully deployed before the next layer can begin, unless noted 
 - **Stack:** `ingestion-lambda-stack.json`
 - **Status:** ✅ Exists (partial — only document ingestion, not chunking/embedding)
 - **Depends on:** `storage-stack` (imports bucket ARNs/names)
+
+### Milestone 2.0: ImportDocuments Lambda (`import-documents-stack`)
+- **Stack:** `import-documents-stack.json`
+- **Status:** ✅ Done
+- **Depends on:** `storage-stack` (imports bucket ARNs/names via `Fn::ImportValue`)
+- **Resources:** ImportDocuments Lambda (Python 3.12), IAM execution role, CloudWatch Logs VPC endpoint, Secrets Manager VPC endpoint
+- **VPC:** Lambda deployed into private subnets with IT-managed security group
+- **Secret management:** Client secret retrieved from Secrets Manager at runtime via `clientSecretArn` env var
+- **Exports:** Function ARN/name, Role ARN, VPC endpoint IDs
+
+### Milestone 2.1a: Remaining Ingestion Lambdas
+- **Status:** ❌ Not yet created
 - **Still needed:**
   - Chunker Lambda — split parsed text into overlapping segments
   - Embedding Generator Lambda — call Bedrock embedding model per chunk batch
@@ -171,6 +183,7 @@ Each layer must be fully deployed before the next layer can begin, unless noted 
 | 1 | `opensearch-stack.json` | ✅ Done |
 | 1 | `dynamodb-stack.json` | ✅ Done |
 | 1 | `bedrock-access-stack.json` | ✅ Done |
+| 2 | `import-documents-stack.json` | ✅ Done |
 | 2 | `ingestion-lambda-stack.json` | 🟡 Partial |
 | 2 | SQS queues + DLQs | ❌ Missing |
 | 3 | Step Functions (orchestrator) | ❌ Missing |

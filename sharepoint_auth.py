@@ -7,6 +7,7 @@ no commercial Azure AD support.
 
 import os
 
+import boto3
 import msal
 
 # GovCloud-only endpoint constants (Req 7.1, 7.2, 7.4)
@@ -73,19 +74,32 @@ def get_access_token() -> str:
     global _client
 
     if _client is None:
-        # Read and validate environment variables (Req 4.1–4.6)
-        env_vars = ("tenantId", "clientId", "clientSecret")
-        values = {}
-        for name in env_vars:
+        # Read and validate required environment variables (Req 4.1–4.6)
+        for name in ("tenantId", "clientId"):
             value = os.environ.get(name, "")
             if not value:
                 raise ValueError(f"Missing required environment variable: {name}")
-            values[name] = value
+
+        tenant_id = os.environ["tenantId"]
+        client_id = os.environ["clientId"]
+
+        # Resolve client secret: prefer direct env var, fall back to Secrets Manager
+        client_secret = os.environ.get("clientSecret", "")
+        if not client_secret:
+            client_secret_arn = os.environ.get("clientSecretArn", "")
+            if not client_secret_arn:
+                raise ValueError(
+                    "Missing required environment variable: either clientSecret "
+                    "or clientSecretArn must be set"
+                )
+            sm = boto3.client("secretsmanager")
+            resp = sm.get_secret_value(SecretId=client_secret_arn)
+            client_secret = resp["SecretString"]
 
         _client = create_auth_client(
-            tenant_id=values["tenantId"],
-            client_id=values["clientId"],
-            client_secret=values["clientSecret"],
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=client_secret,
         )
 
     # Step 1: Try the cache first (Req 2.1, 3.2)

@@ -1,0 +1,419 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "ImportDocuments Lambda function (Python 3.12) deployed into VPC private subnets with least-privilege IAM role, CloudWatch Logs and Secrets Manager VPC interface endpoints. S3 access routes through the existing S3 Gateway Endpoint created by the Storage_Stack \u2014 this stack does not create an S3 VPC endpoint.",
+    "Parameters": {
+        "ClientId": {
+            "Type": "String",
+            "Description": "Azure AD client (application) ID for SharePoint authentication"
+        },
+        "ClientSecretArn": {
+            "Type": "String",
+            "Description": "ARN of the Secrets Manager secret containing the Azure AD client secret"
+        },
+        "CsvCategories": {
+            "Type": "String",
+            "Default": "",
+            "Description": "Comma-separated category filter (optional, defaults to empty string)"
+        },
+        "DriveName": {
+            "Type": "String",
+            "Description": "SharePoint document library (drive) name"
+        },
+        "EnvironmentTag": {
+            "Type": "String",
+            "Description": "Environment tag value for resources (e.g. Production, Staging, Development)"
+        },
+        "InternalSGId": {
+            "Type": "AWS::EC2::SecurityGroup::Id",
+            "Description": "IT-managed security group ID for Lambda and VPC endpoints"
+        },
+        "LambdaS3Key": {
+            "Type": "String",
+            "Description": "S3 object key of the Lambda deployment zip in the Pipeline_Artifacts_Bucket"
+        },
+        "PrivateRouteTableId": {
+            "Type": "String",
+            "Description": "Route table ID for the private subnets (accepted for orchestrator consistency; not used by this stack's resources)"
+        },
+        "PrivateSubnetAId": {
+            "Type": "AWS::EC2::Subnet::Id",
+            "Description": "Private Subnet A ID for Lambda and VPC endpoints"
+        },
+        "PrivateSubnetBId": {
+            "Type": "AWS::EC2::Subnet::Id",
+            "Description": "Private Subnet B ID for Lambda and VPC endpoints"
+        },
+        "ProjectPrefix": {
+            "Type": "String",
+            "MaxLength": 30,
+            "AllowedPattern": "^[a-z0-9][a-z0-9\\-]*[a-z0-9]$",
+            "Description": "Short prefix for resource names (e.g. rag-dev). Max 30 chars, lowercase alphanumeric and hyphens only."
+        },
+        "SharePointFolderPath": {
+            "Type": "String",
+            "Default": "",
+            "Description": "SharePoint folder path filter (optional, defaults to empty string)"
+        },
+        "SharepointUrl": {
+            "Type": "String",
+            "Description": "SharePoint site URL"
+        },
+        "StorageStackName": {
+            "Type": "String",
+            "Description": "Name of the Storage_Stack for cross-stack imports (S3 bucket names and ARNs)"
+        },
+        "TenantId": {
+            "Type": "String",
+            "Description": "Azure AD tenant ID for SharePoint authentication"
+        },
+        "VpcId": {
+            "Type": "AWS::EC2::VPC::Id",
+            "Description": "VPC ID for the interface endpoints"
+        }
+    },
+    "Resources": {
+        "CloudWatchLogsVpcEndpoint": {
+            "Type": "AWS::EC2::VPCEndpoint",
+            "Properties": {
+                "VpcEndpointType": "Interface",
+                "ServiceName": {
+                    "Fn::Sub": "com.amazonaws.${AWS::Region}.logs"
+                },
+                "VpcId": {
+                    "Ref": "VpcId"
+                },
+                "SubnetIds": [
+                    {
+                        "Ref": "PrivateSubnetAId"
+                    },
+                    {
+                        "Ref": "PrivateSubnetBId"
+                    }
+                ],
+                "SecurityGroupIds": [
+                    {
+                        "Ref": "InternalSGId"
+                    }
+                ],
+                "PrivateDnsEnabled": true,
+                "Tags": [
+                    {
+                        "Key": "Environment",
+                        "Value": {
+                            "Ref": "EnvironmentTag"
+                        }
+                    },
+                    {
+                        "Key": "Project",
+                        "Value": "RAGPipeline"
+                    }
+                ]
+            }
+        },
+        "ImportDocumentsFunction": {
+            "Type": "AWS::Lambda::Function",
+            "DependsOn": [
+                "CloudWatchLogsVpcEndpoint",
+                "SecretsManagerVpcEndpoint"
+            ],
+            "Properties": {
+                "FunctionName": {
+                    "Fn::Sub": "${ProjectPrefix}-import-documents"
+                },
+                "Runtime": "python3.12",
+                "Handler": "import_documents.handler",
+                "Timeout": 120,
+                "MemorySize": 512,
+                "Architectures": [
+                    "x86_64"
+                ],
+                "Code": {
+                    "S3Bucket": {
+                        "Fn::ImportValue": {
+                            "Fn::Sub": "${StorageStackName}-PipelineArtifactsBucketName"
+                        }
+                    },
+                    "S3Key": {
+                        "Ref": "LambdaS3Key"
+                    }
+                },
+                "Role": {
+                    "Fn::GetAtt": [
+                        "ImportDocumentsRole",
+                        "Arn"
+                    ]
+                },
+                "VpcConfig": {
+                    "SubnetIds": [
+                        {
+                            "Ref": "PrivateSubnetAId"
+                        },
+                        {
+                            "Ref": "PrivateSubnetBId"
+                        }
+                    ],
+                    "SecurityGroupIds": [
+                        {
+                            "Ref": "InternalSGId"
+                        }
+                    ]
+                },
+                "Environment": {
+                    "Variables": {
+                        "clientId": {
+                            "Ref": "ClientId"
+                        },
+                        "clientSecretArn": {
+                            "Ref": "ClientSecretArn"
+                        },
+                        "tenantId": {
+                            "Ref": "TenantId"
+                        },
+                        "sharepointUrl": {
+                            "Ref": "SharepointUrl"
+                        },
+                        "driveName": {
+                            "Ref": "DriveName"
+                        },
+                        "outputBucket": {
+                            "Fn::ImportValue": {
+                                "Fn::Sub": "${StorageStackName}-RawDocumentsBucketName"
+                            }
+                        },
+                        "csvCategories": {
+                            "Ref": "CsvCategories"
+                        },
+                        "sharePointFolderPath": {
+                            "Ref": "SharePointFolderPath"
+                        }
+                    }
+                },
+                "Tags": [
+                    {
+                        "Key": "Environment",
+                        "Value": {
+                            "Ref": "EnvironmentTag"
+                        }
+                    },
+                    {
+                        "Key": "Project",
+                        "Value": "RAGPipeline"
+                    }
+                ]
+            }
+        },
+        "ImportDocumentsRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "RoleName": {
+                    "Fn::Sub": "${ProjectPrefix}-import-documents-role"
+                },
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "lambda.amazonaws.com"
+                            },
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                },
+                "Policies": [
+                    {
+                        "PolicyName": "S3AccessPolicy",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "s3:PutObject",
+                                        "s3:PutObjectTagging"
+                                    ],
+                                    "Resource": {
+                                        "Fn::Sub": [
+                                            "arn:${AWS::Partition}:s3:::${BucketName}/*",
+                                            {
+                                                "BucketName": {
+                                                    "Fn::ImportValue": {
+                                                        "Fn::Sub": "${StorageStackName}-RawDocumentsBucketName"
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "PolicyName": "CloudWatchLogsPolicy",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "logs:CreateLogGroup",
+                                        "logs:CreateLogStream",
+                                        "logs:PutLogEvents"
+                                    ],
+                                    "Resource": {
+                                        "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProjectPrefix}-import-documents:*"
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "PolicyName": "VPCAccessPolicy",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "ec2:CreateNetworkInterface",
+                                        "ec2:DescribeNetworkInterfaces",
+                                        "ec2:DeleteNetworkInterface"
+                                    ],
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "PolicyName": "SecretsManagerPolicy",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": "secretsmanager:GetSecretValue",
+                                    "Resource": {
+                                        "Ref": "ClientSecretArn"
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Environment",
+                        "Value": {
+                            "Ref": "EnvironmentTag"
+                        }
+                    },
+                    {
+                        "Key": "Project",
+                        "Value": "RAGPipeline"
+                    }
+                ]
+            }
+        },
+        "SecretsManagerVpcEndpoint": {
+            "Type": "AWS::EC2::VPCEndpoint",
+            "Properties": {
+                "VpcEndpointType": "Interface",
+                "ServiceName": {
+                    "Fn::Sub": "com.amazonaws.${AWS::Region}.secretsmanager"
+                },
+                "VpcId": {
+                    "Ref": "VpcId"
+                },
+                "SubnetIds": [
+                    {
+                        "Ref": "PrivateSubnetAId"
+                    },
+                    {
+                        "Ref": "PrivateSubnetBId"
+                    }
+                ],
+                "SecurityGroupIds": [
+                    {
+                        "Ref": "InternalSGId"
+                    }
+                ],
+                "PrivateDnsEnabled": true,
+                "Tags": [
+                    {
+                        "Key": "Environment",
+                        "Value": {
+                            "Ref": "EnvironmentTag"
+                        }
+                    },
+                    {
+                        "Key": "Project",
+                        "Value": "RAGPipeline"
+                    }
+                ]
+            }
+        }
+    },
+    "Outputs": {
+        "CloudWatchLogsVpcEndpointId": {
+            "Description": "ID of the CloudWatch Logs VPC interface endpoint",
+            "Value": {
+                "Ref": "CloudWatchLogsVpcEndpoint"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-CloudWatchLogsVpcEndpointId"
+                }
+            }
+        },
+        "ImportDocumentsFunctionArn": {
+            "Description": "ARN of the ImportDocuments Lambda function",
+            "Value": {
+                "Fn::GetAtt": [
+                    "ImportDocumentsFunction",
+                    "Arn"
+                ]
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-ImportDocumentsFunctionArn"
+                }
+            }
+        },
+        "ImportDocumentsFunctionName": {
+            "Description": "Name of the ImportDocuments Lambda function",
+            "Value": {
+                "Ref": "ImportDocumentsFunction"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-ImportDocumentsFunctionName"
+                }
+            }
+        },
+        "ImportDocumentsRoleArn": {
+            "Description": "ARN of the ImportDocuments IAM execution role",
+            "Value": {
+                "Fn::GetAtt": [
+                    "ImportDocumentsRole",
+                    "Arn"
+                ]
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-ImportDocumentsRoleArn"
+                }
+            }
+        },
+        "SecretsManagerVpcEndpointId": {
+            "Description": "ID of the Secrets Manager VPC interface endpoint",
+            "Value": {
+                "Ref": "SecretsManagerVpcEndpoint"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-SecretsManagerVpcEndpointId"
+                }
+            }
+        }
+    }
+}

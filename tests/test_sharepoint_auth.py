@@ -606,3 +606,143 @@ class TestErrorPropagationAndModuleInterface:
         """Req 7.2, 7.4: GOVCLOUD_GRAPH_SCOPE is a list with the correct GovCloud scope."""
         assert isinstance(GOVCLOUD_GRAPH_SCOPE, list)
         assert GOVCLOUD_GRAPH_SCOPE == ["https://graph.microsoft.us/.default"]
+
+
+# ===========================================================================
+# Task 9.1: Tests for Secrets Manager integration (clientSecretArn code path)
+# ===========================================================================
+
+
+class TestSecretsManagerIntegration:
+    """Tests for the Secrets Manager retrieval path introduced by Task 8.
+
+    Validates: Requirements 3.2, 4.2, 5.5
+    """
+
+    def test_secrets_manager_path_retrieves_secret(self):
+        """When only clientSecretArn is set (no clientSecret), boto3 secretsmanager
+        client is called with the correct ARN and the retrieved secret is passed
+        to create_auth_client.
+
+        Validates: Requirements 3.2, 4.2
+        """
+        sharepoint_auth._client = None
+
+        env = {
+            "tenantId": "test-tenant",
+            "clientId": "test-client",
+            "clientSecretArn": "arn:aws-us-gov:secretsmanager:us-gov-west-1:123456789012:secret:my-secret",
+        }
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch("sharepoint_auth.boto3.client") as mock_boto_client, \
+             patch("sharepoint_auth.msal.ConfidentialClientApplication") as mock_cca:
+
+            # Set up the Secrets Manager mock
+            mock_sm = MagicMock()
+            mock_boto_client.return_value = mock_sm
+            mock_sm.get_secret_value.return_value = {
+                "SecretString": "retrieved-secret-value",
+            }
+
+            # Set up the MSAL mock
+            mock_instance = MagicMock()
+            mock_cca.return_value = mock_instance
+            mock_instance.acquire_token_silent_with_error.return_value = None
+            mock_instance.acquire_token_for_client.return_value = {
+                "access_token": "tok",
+            }
+
+            get_access_token()
+
+            # Verify boto3 was called to create a secretsmanager client
+            mock_boto_client.assert_called_once_with("secretsmanager")
+
+            # Verify GetSecretValue was called with the correct ARN
+            mock_sm.get_secret_value.assert_called_once_with(
+                SecretId="arn:aws-us-gov:secretsmanager:us-gov-west-1:123456789012:secret:my-secret"
+            )
+
+            # Verify the retrieved secret was passed to create_auth_client
+            call_kwargs = mock_cca.call_args.kwargs
+            assert call_kwargs["client_credential"] == "retrieved-secret-value"
+
+    def test_client_secret_env_var_takes_precedence(self):
+        """When both clientSecret and clientSecretArn are set, clientSecret is
+        used directly and boto3 is NOT called.
+
+        Validates: Requirements 3.2, 5.5
+        """
+        sharepoint_auth._client = None
+
+        env = {
+            "tenantId": "test-tenant",
+            "clientId": "test-client",
+            "clientSecret": "direct-secret",
+            "clientSecretArn": "arn:aws-us-gov:secretsmanager:us-gov-west-1:123456789012:secret:my-secret",
+        }
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch("sharepoint_auth.boto3.client") as mock_boto_client, \
+             patch("sharepoint_auth.msal.ConfidentialClientApplication") as mock_cca:
+
+            mock_instance = MagicMock()
+            mock_cca.return_value = mock_instance
+            mock_instance.acquire_token_silent_with_error.return_value = None
+            mock_instance.acquire_token_for_client.return_value = {
+                "access_token": "tok",
+            }
+
+            get_access_token()
+
+            # boto3 should NOT have been called — clientSecret env var takes precedence
+            mock_boto_client.assert_not_called()
+
+            # Verify the direct secret was used
+            call_kwargs = mock_cca.call_args.kwargs
+            assert call_kwargs["client_credential"] == "direct-secret"
+
+    def test_secrets_manager_error_propagates(self):
+        """When clientSecretArn is set but the boto3 call raises an exception,
+        the exception propagates to the caller.
+
+        Validates: Requirements 5.5
+        """
+        from botocore.exceptions import ClientError
+
+        sharepoint_auth._client = None
+
+        env = {
+            "tenantId": "test-tenant",
+            "clientId": "test-client",
+            "clientSecretArn": "arn:aws-us-gov:secretsmanager:us-gov-west-1:123456789012:secret:bad-secret",
+        }
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch("sharepoint_auth.boto3.client") as mock_boto_client:
+
+            mock_sm = MagicMock()
+            mock_boto_client.return_value = mock_sm
+            mock_sm.get_secret_value.side_effect = ClientError(
+                {"Error": {"Code": "ResourceNotFoundException", "Message": "Secret not found"}},
+                "GetSecretValue",
+            )
+
+            with pytest.raises(ClientError):
+                get_access_token()
+
+    def test_neither_secret_nor_arn_raises_value_error(self):
+        """When neither clientSecret nor clientSecretArn is set, ValueError is raised.
+
+        Validates: Requirements 5.5
+        """
+        sharepoint_auth._client = None
+
+        env = {
+            "tenantId": "test-tenant",
+            "clientId": "test-client",
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(ValueError, match="clientSecret"):
+                get_access_token()

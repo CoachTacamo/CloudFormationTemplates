@@ -26,13 +26,16 @@
 
 ## 2. Stack Architecture
 
-The deployment uses a nested stack pattern. The orchestrator is the parent stack and it references three child stacks:
+The deployment uses a nested stack pattern. The orchestrator is the parent stack and it references child stacks:
 
 ```
 rag-pipeline-orchestrator-stack.json        (parent)
-  ├── storage-stack.json                    (S3 buckets)
-  ├── dynamodb-stack.json                   (DynamoDB tables + VPC endpoint)
-  └── opensearch-stack.json                 (OpenSearch Serverless collection + VPC endpoint)
+  ├── storage-stack.json                    (S3 buckets + S3 gateway endpoint)
+  ├── dynamodb-stack.json                   (DynamoDB tables + DynamoDB gateway endpoint)
+  ├── opensearch-stack.json                 (OpenSearch Serverless collection + VPC endpoint)
+  ├── rds-stack.json                        (PostgreSQL RDS instance)
+  ├── bedrock-access-stack.json             (Bedrock model access custom resource)
+  └── import-documents-stack.json           (ImportDocuments Lambda + VPC endpoints)
 ```
 
 The `aws cloudformation package` command uploads the child templates to S3 and rewrites the local `TemplateURL` references to S3 URLs, producing a deployment-ready `rag-pipeline-packaged-stack.json`.
@@ -41,9 +44,12 @@ The `aws cloudformation package` command uploads the child templates to S3 and r
 
 | Nested Stack | Resources |
 |---|---|
-| storage-stack | 6 S3 buckets: raw-documents, processed-documents, embeddings-vectors, metadata-index, pipeline-artifacts, logs-audit |
+| storage-stack | 6 S3 buckets: raw-documents, processed-documents, embeddings-vectors, metadata-index, pipeline-artifacts, logs-audit; S3 gateway VPC endpoint |
 | dynamodb-stack | Documents table, Chunks table, DynamoDB gateway VPC endpoint |
 | opensearch-stack | OpenSearch Serverless vector search collection, VPC endpoint, encryption/network/data-access policies |
+| rds-stack | PostgreSQL RDS instance, DB subnet group, security group, Secrets Manager secret for master credentials |
+| bedrock-access-stack | IAM role, Lambda function, custom resource for Bedrock model access agreements |
+| import-documents-stack | ImportDocuments Lambda (Python 3.12), IAM execution role, CloudWatch Logs VPC endpoint, Secrets Manager VPC endpoint |
 
 ---
 
@@ -147,7 +153,21 @@ The orchestrator stack requires networking inputs so it can deploy into any VPC.
 | `InternalSGId` | `AWS::EC2::SecurityGroup::Id` | Yes | — | Security group for internal pipeline communication |
 | `PrivateRouteTableId` | `String` | Yes | — | Route table ID for the private subnets (used for gateway endpoints) |
 | `ProjectPrefix` | `String` | Yes | — | Short prefix for resource names (e.g., `rag-dev`). Max 30 chars, lowercase alphanumeric and hyphens only. |
+| `EnvironmentTag` | `String` | Yes | — | Environment tag value (e.g., `Production`, `Staging`, `Development`) |
+| `DeploymentDate` | `String` | Yes | — | Deployment date in `MM-DD-YYYY` format (e.g., `07-15-2026`). Used in the RDS instance identifier. |
+| `TenantId` | `String` | Yes | — | Azure AD tenant ID for SharePoint authentication (ImportDocuments) |
+| `ClientId` | `String` | Yes | — | Azure AD client (application) ID for SharePoint authentication (ImportDocuments) |
+| `ClientSecretArn` | `String` | Yes | — | ARN of the Secrets Manager secret containing the Azure AD client secret (ImportDocuments) |
+| `SharepointUrl` | `String` | Yes | — | SharePoint site URL (ImportDocuments) |
+| `DriveName` | `String` | Yes | — | SharePoint document library (drive) name (ImportDocuments) |
+| `ImportDocumentsLambdaS3Key` | `String` | Yes | — | S3 key of the ImportDocuments Lambda zip in the pipeline artifacts bucket |
 | `StandbyReplicas` | `String` | No | `DISABLED` | OpenSearch standby replicas. Set to `ENABLED` for production HA. `DISABLED` cuts cost in half for dev/test. |
+| `RdsDeletionProtection` | `String` | No | `false` | Enable RDS deletion protection. Set to `true` for production. |
+| `RdsKmsKeyArn` | `String` | No | `""` | Optional KMS key ARN for RDS storage and Secrets Manager encryption. Leave empty for AWS-managed key. |
+| `RdsMasterUsername` | `String` | No | `pgadmin` | Master username for the RDS PostgreSQL instance (NoEcho). |
+| `RdsMultiAZ` | `String` | No | `false` | Enable Multi-AZ for RDS. Set to `true` for production. |
+| `CsvCategories` | `String` | No | `""` | Comma-separated category filter for ImportDocuments (optional) |
+| `SharePointFolderPath` | `String` | No | `""` | SharePoint folder path filter for ImportDocuments (optional) |
 
 ### Look Up Values from Your Account
 
@@ -219,11 +239,45 @@ aws cloudformation deploy \
     InternalSGId=<YOUR_SECURITY_GROUP_ID> \
     PrivateRouteTableId=<YOUR_ROUTE_TABLE_ID> \
     ProjectPrefix=<YOUR_PROJECT_PREFIX> \
+    EnvironmentTag=<YOUR_ENVIRONMENT> \
+    DeploymentDate=<MM-DD-YYYY> \
+    TenantId=<YOUR_AZURE_AD_TENANT_ID> \
+    ClientId=<YOUR_AZURE_AD_CLIENT_ID> \
+    ClientSecretArn=<YOUR_SECRETS_MANAGER_ARN> \
+    SharepointUrl=<YOUR_SHAREPOINT_SITE_URL> \
+    DriveName=<YOUR_SHAREPOINT_DRIVE_NAME> \
+    ImportDocumentsLambdaS3Key=<YOUR_LAMBDA_ZIP_S3_KEY> \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
   --profile <YOUR_PROFILE>
 ```
 
+#### Preparing the ImportDocuments Lambda Zip
+
+Before deploying, upload the Lambda deployment package to the pipeline artifacts bucket:
+
 ```bash
+# Create the zip (from the project root containing import_documents.py, sharepoint_auth.py, etc.)
+zip -r import-documents-lambda.zip import_documents.py sharepoint_auth.py sharepoint_graph.py
+
+# Upload to the pipeline artifacts bucket
+aws s3 cp import-documents-lambda.zip \
+  s3://<YOUR_PROJECT_PREFIX>-pipeline-artifacts/lambdas/import-documents-lambda.zip \
+  --profile <YOUR_PROFILE>
+```
+
+Then use `ImportDocumentsLambdaS3Key=lambdas/import-documents-lambda.zip` in the deploy command.
+
+#### Concrete Example (GovCloud)
+
+```bash
+# Package
+aws cloudformation package \
+  --template-file rag-pipeline-orchestrator-stack.json \
+  --s3-bucket prototype-rag-cfn-artifacts-bucket \
+  --output-template-file rag-pipeline-packaged-stack.json \
+  --profile CloudAdmin
+
+# Deploy
 aws cloudformation deploy \
   --template-file rag-pipeline-packaged-stack.json \
   --stack-name prototype-rag-stack \
@@ -234,35 +288,24 @@ aws cloudformation deploy \
     InternalSGId=sg-036ab67eaf04608ba \
     PrivateRouteTableId=rtb-01dfd50f0fc9add70 \
     ProjectPrefix=prototype-rag \
+    EnvironmentTag=Development \
+    DeploymentDate=04-15-2026 \
+    TenantId=a1b2c3d4-e5f6-7890-abcd-ef1234567890 \
+    ClientId=12345678-abcd-ef01-2345-6789abcdef01 \
+    ClientSecretArn=arn:aws-us-gov:secretsmanager:us-gov-west-1:123456789012:secret:prototype-rag-sp-client-secret-AbCdEf \
+    SharepointUrl=https://contoso.sharepoint.us/sites/documents \
+    DriveName=Shared\ Documents \
+    ImportDocumentsLambdaS3Key=lambdas/import-documents-lambda.zip \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
   --profile CloudAdmin
 ```
 
 To also enable OpenSearch standby replicas (production), add `StandbyReplicas=ENABLED` to the `--parameter-overrides`.
 
-### Concrete Example
-
-```bash
-# Package
-aws cloudformation package \
-  --template-file rag-pipeline-orchestrator-stack.json \
-  --s3-bucket coachai-ka-cloudformation-test-grounds \
-  --output-template-file rag-pipeline-packaged-stack.json \
-  --profile data-scientist
-
-# Deploy
-aws cloudformation deploy \
-  --template-file rag-pipeline-packaged-stack.json \
-  --stack-name rag-dev-pipeline \
-  --parameter-overrides \
-    VpcId=vpc-012429bc93f27a9f5 \
-    PrivateSubnetAId=subnet-0ff7bcd4a9c1a5870 \
-    PrivateSubnetBId=subnet-08a253f368f2999e3 \
-    InternalSGId=sg-0133fcd976e48eb44 \
-    PrivateRouteTableId=rtb-0c37ed372d2701eaf \
-    ProjectPrefix=rag-dev \
-  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-  --profile data-scientist
+To filter ImportDocuments to a specific SharePoint folder or categories, add:
+```
+    CsvCategories=Policy,Procedure \
+    SharePointFolderPath=/sites/documents/Policies \
 ```
 
 ### Notes
@@ -300,6 +343,14 @@ aws cloudformation deploy \
     InternalSGId=<YOUR_SECURITY_GROUP_ID> \
     PrivateRouteTableId=<YOUR_ROUTE_TABLE_ID> \
     ProjectPrefix=<YOUR_PROJECT_PREFIX> \
+    EnvironmentTag=<YOUR_ENVIRONMENT> \
+    DeploymentDate=<MM-DD-YYYY> \
+    TenantId=<YOUR_AZURE_AD_TENANT_ID> \
+    ClientId=<YOUR_AZURE_AD_CLIENT_ID> \
+    ClientSecretArn=<YOUR_SECRETS_MANAGER_ARN> \
+    SharepointUrl=<YOUR_SHAREPOINT_SITE_URL> \
+    DriveName=<YOUR_SHAREPOINT_DRIVE_NAME> \
+    ImportDocumentsLambdaS3Key=<YOUR_LAMBDA_ZIP_S3_KEY> \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
   --profile <YOUR_PROFILE>
 ```
@@ -327,6 +378,14 @@ aws cloudformation deploy \
     InternalSGId=<YOUR_SECURITY_GROUP_ID> \
     PrivateRouteTableId=<YOUR_ROUTE_TABLE_ID> \
     ProjectPrefix=<YOUR_PROJECT_PREFIX> \
+    EnvironmentTag=<YOUR_ENVIRONMENT> \
+    DeploymentDate=<MM-DD-YYYY> \
+    TenantId=<YOUR_AZURE_AD_TENANT_ID> \
+    ClientId=<YOUR_AZURE_AD_CLIENT_ID> \
+    ClientSecretArn=<YOUR_SECRETS_MANAGER_ARN> \
+    SharepointUrl=<YOUR_SHAREPOINT_SITE_URL> \
+    DriveName=<YOUR_SHAREPOINT_DRIVE_NAME> \
+    ImportDocumentsLambdaS3Key=<YOUR_LAMBDA_ZIP_S3_KEY> \
   --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
   --profile <YOUR_PROFILE> \
   --no-execute-changeset
