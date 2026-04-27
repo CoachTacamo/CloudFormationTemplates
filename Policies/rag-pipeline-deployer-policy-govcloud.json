@@ -230,25 +230,87 @@
       }
     },
     {
-      "Sid": "IAMRoleManagementForBedrockAccess",
+      "Sid": "DynamoDBTableManagement",
       "Effect": "Allow",
       "Action": [
+        "dynamodb:CreateTable",
+        "dynamodb:DeleteTable",
+        "dynamodb:DescribeContinuousBackups",
+        "dynamodb:DescribeTable",
+        "dynamodb:DescribeTimeToLive",
+        "dynamodb:DescribeKinesisStreamingDestination",
+        "dynamodb:ListTagsOfResource",
+        "dynamodb:TagResource",
+        "dynamodb:UntagResource",
+        "dynamodb:UpdateContinuousBackups",
+        "dynamodb:UpdateTable",
+        "dynamodb:UpdateTimeToLive"
+      ],
+      "Resource": [
+        "arn:aws-us-gov:dynamodb:us-gov-west-1:xxxxxxxxxxxx:table/rag-*-documents",
+        "arn:aws-us-gov:dynamodb:us-gov-west-1:xxxxxxxxxxxx:table/rag-*-chunks"
+      ]
+    },
+    {
+      "Sid": "RDSInstanceManagement",
+      "Effect": "Allow",
+      "Action": [
+        "rds:AddTagsToResource",
+        "rds:CreateDBInstance",
+        "rds:CreateDBSubnetGroup",
+        "rds:DeleteDBInstance",
+        "rds:DeleteDBSubnetGroup",
+        "rds:DescribeDBInstances",
+        "rds:DescribeDBSubnetGroups",
+        "rds:ListTagsForResource",
+        "rds:ModifyDBInstance",
+        "rds:RemoveTagsFromResource"
+      ],
+      "Resource": [
+        "arn:aws-us-gov:rds:us-gov-west-1:xxxxxxxxxxxx:db:rag-*",
+        "arn:aws-us-gov:rds:us-gov-west-1:xxxxxxxxxxxx:subgrp:*"
+      ]
+    },
+    {
+      "Sid": "SecretsManagerForRDS",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:CreateSecret",
+        "secretsmanager:DeleteSecret",
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:TagResource"
+      ],
+      "Resource": [
+        "arn:aws-us-gov:secretsmanager:us-gov-west-1:xxxxxxxxxxxx:secret:rds!db-*"
+      ]
+    },
+    {
+      "Sid": "IAMRoleManagement",
+      "Effect": "Allow",
+      "Action": [
+        "iam:AttachRolePolicy",
         "iam:CreateRole",
         "iam:DeleteRole",
-        "iam:GetRole",
-        "iam:PutRolePolicy",
         "iam:DeleteRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:GetRole",
         "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
         "iam:PassRole",
+        "iam:PutRolePolicy",
         "iam:TagRole",
         "iam:UntagRole"
       ],
       "Resource": [
-        "arn:aws-us-gov:iam::xxxxxxxxxxxx:role/rag-*-bedrock-access-role"
+        "arn:aws-us-gov:iam::xxxxxxxxxxxx:role/rag-*-bedrock-access-role",
+        "arn:aws-us-gov:iam::xxxxxxxxxxxx:role/rag-*-import-documents-role",
+        "arn:aws-us-gov:iam::xxxxxxxxxxxx:role/rag-*-rds-monitoring-role"
       ]
     },
     {
-      "Sid": "LambdaManagementForBedrockAccess",
+      "Sid": "LambdaManagement",
       "Effect": "Allow",
       "Action": [
         "lambda:CreateFunction",
@@ -256,25 +318,70 @@
         "lambda:GetFunction",
         "lambda:GetFunctionConfiguration",
         "lambda:InvokeFunction",
-        "lambda:UpdateFunctionCode",
-        "lambda:UpdateFunctionConfiguration",
+        "lambda:ListTags",
         "lambda:TagResource",
-        "lambda:UntagResource"
+        "lambda:UntagResource",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration"
       ],
       "Resource": [
-        "arn:aws-us-gov:lambda:us-gov-west-1:xxxxxxxxxxxx:function:rag-*-bedrock-access"
+        "arn:aws-us-gov:lambda:us-gov-west-1:xxxxxxxxxxxx:function:rag-*-bedrock-access",
+        "arn:aws-us-gov:lambda:us-gov-west-1:xxxxxxxxxxxx:function:rag-*-import-documents"
       ]
     },
     {
-      "Sid": "CloudWatchLogsForBedrockAccess",
+      "Sid": "CloudWatchLogsManagement",
       "Effect": "Allow",
       "Action": [
         "logs:CreateLogGroup",
         "logs:DeleteLogGroup",
-        "logs:DescribeLogGroups"
+        "logs:DescribeLogGroups",
+        "logs:ListTagsForResource",
+        "logs:PutRetentionPolicy",
+        "logs:TagResource",
+        "logs:UntagResource"
       ],
       "Resource": [
-        "arn:aws-us-gov:logs:us-gov-west-1:xxxxxxxxxxxx:log-group:/aws/lambda/rag-*-bedrock-access:*"
+        "arn:aws-us-gov:logs:us-gov-west-1:xxxxxxxxxxxx:log-group:/aws/lambda/rag-*-bedrock-access:*",
+        "arn:aws-us-gov:logs:us-gov-west-1:xxxxxxxxxxxx:log-group:/aws/lambda/rag-*-import-documents:*"
+      ]
+    },
+    {
+      "Sid": "BedrockModelAccessManagement",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:CreateFoundationModelAgreement",
+        "bedrock:DeleteFoundationModelAgreement",
+        "bedrock:GetFoundationModelAvailability",
+        "bedrock:ListFoundationModelAgreementOffers"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-gov-west-1"
+        }
+      }
+    },
+    {
+      "Sid": "MarketplaceForBedrock",
+      "Effect": "Allow",
+      "Action": [
+        "aws-marketplace:Subscribe",
+        "aws-marketplace:Unsubscribe",
+        "aws-marketplace:ViewSubscriptions"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "S3ObjectManagementForDeployment",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws-us-gov:s3:::*-pipeline-artifacts/*"
       ]
     }
   ]
